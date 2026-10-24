@@ -1,0 +1,38 @@
+.bookDetails {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.busImageSmall {
+  width: 150px;
+  height: 100px;
+  background-color: var(--bg-gray);
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.bookingInfo {
+  flex: 1;
+}
+
+.bookingInfo h3 {
+  font-size: 20px;
+  margin-bottom: 10px;
+  color: var(--text-dark);
+}
+
+.routeInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  color: var(--text-dark);
+}
+
+.centerContent {
+  display: flex;
+  justify-content: center;
+  margin-top: 30px;
+}

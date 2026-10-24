@@ -1,0 +1,68 @@
+.busImage {
+  width: 100%;
+  max-width: 600px;
+  margin: 20px auto;
+  display: block;
+}
+
+.routesSection {
+  margin-top: 30px;
+}
+
+.routesSection h3 {
+  font-size: 22px;
+  margin-bottom: 20px;
+  color: var(--text-dark);
+}
+
+.routesGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+}
+
+.routeCard {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.routeImage {
+  width: 100%;
+  height: 100px;
+  background-color: var(--bg-gray);
+  border-radius: 5px;
+  margin-bottom: 15px;
+}
+
+.routeCard h4 {
+  font-size: 16px;
+  margin-bottom: 5px;
+  color: var(--text-dark);
+}
+
+.price {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-dark);
+  margin-bottom: 5px;
+}
+
+.duration {
+  color: var(--text-gray);
+  font-size: 14px;
+}
+
+.centerContent {
+  display: flex;
+  justify-content: center;
+  margin-top: 30px;
+}
+
+@media (max-width: 768px) {
+  .routesGrid {
+    grid-template-columns: 1fr;
+  }
+}

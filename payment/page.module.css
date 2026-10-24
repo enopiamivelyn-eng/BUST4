@@ -1,0 +1,93 @@
+.bookDetails {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.busImageSmall {
+  width: 150px;
+  height: 100px;
+  background-color: var(--bg-gray);
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.bookingInfo {
+  flex: 1;
+}
+
+.bookingInfo h3 {
+  font-size: 20px;
+  margin-bottom: 10px;
+  color: var(--text-dark);
+}
+
+.routeInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  color: var(--text-dark);
+}
+
+.totalSection {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.paymentMethods {
+  margin-top: 20px;
+}
+
+.paymentOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px;
+  border: 2px solid var(--light-blue);
+  border-radius: 5px;
+  margin-bottom: 15px;
+  cursor: pointer;
+  transition: border-color 0.3s;
+}
+
+.paymentOption:hover {
+  border-color: var(--primary-blue);
+}
+
+.paymentOption input[type="radio"] {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.paymentLeft {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.paymentIcon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-gray);
+  border-radius: 5px;
+}
+
+.centerContent {
+  display: flex;
+  justify-content: center;
+  margin-top: 30px;
+}
