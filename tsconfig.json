@@ -30,5 +30,20 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "./about/**/*",
+    "./admin/**/*",
+    "./booking-confirmation/**/*",
+    "./home/**/*",
+    "./login/**/*",
+    "./my-bookings/**/*",
+    "./passenger-details/**/*",
+    "./payment/**/*",
+    "./profile/**/*",
+    "./reservation/**/*",
+    "./search/**/*",
+    "./search-results/**/*",
+    "./ticket/**/*"
+  ]
 }
