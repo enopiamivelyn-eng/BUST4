@@ -5,6 +5,8 @@ import Sidebar from '../components/Sidebar';
 import AuthGate from '../components/AuthGate';
 import { useAuth } from '../components/AuthContext';
 import Navbar from '../components/Navbar';
+import { useRouter } from 'next/navigation';
+import { useAutoSave } from '../components/useAutoSave';
 
 interface Route {
   id: string;
@@ -29,9 +31,11 @@ const formatPrice = (amount: number): string => {
 };
 
 export default function RoutesPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const username = user?.name ?? 'Traveller';
   const isAdmin = user?.role === 'admin';
+  useEffect(() => { if (user && !isAdmin) router.replace('/home'); }, [user, isAdmin, router]);
   
   const [routes, setRoutes] = useState<Route[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,14 +52,31 @@ export default function RoutesPage() {
     duration: '',
     status: 'active'
   });
+  const autoSave = useAutoSave();
 
   useEffect(() => {
     fetchRoutes();
+    const interval = window.setInterval(() => void fetchRoutes(), 10000);
+    const refresh = () => void fetchRoutes();
+    window.addEventListener('app:database-change', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('app:database-change', refresh);
+    };
   }, []);
+
+  const saveRouteEdit = (values: typeof formData) => {
+    if (!editingRoute) return;
+    void autoSave.save(`/api/admin/routes/${editingRoute.id}`, {
+      ...values,
+      distance: Number(values.distance),
+      basePrice: Number(values.basePrice),
+    }).then(() => void fetchRoutes());
+  };
 
   const fetchRoutes = async () => {
     try {
-      const response = await fetch('/api/routes', {
+      const response = await fetch('/api/admin/routes', {
         credentials: 'include'
       });
       
@@ -75,16 +96,14 @@ export default function RoutesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (editingRoute) {
+      saveRouteEdit(formData);
+      return;
+    }
 
     try {
-      const url = editingRoute 
-        ? `/api/admin/routes/${editingRoute.id}`
-        : '/api/admin/routes';
-      
-      const method = editingRoute ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method,
+      const response = await fetch('/api/admin/routes', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
@@ -113,6 +132,7 @@ export default function RoutesPage() {
   };
 
   const handleEdit = (route: Route) => {
+    autoSave.reset();
     setEditingRoute(route);
     setFormData({
       name: route.name,
@@ -280,6 +300,7 @@ export default function RoutesPage() {
                   </div>
                   
                   <div className="ds-modal-body">
+                    {editingRoute && <p className="ds-note" role="status" aria-live="polite">{autoSave.status === 'saving' ? 'Saving...' : autoSave.status === 'saved' ? 'Saved successfully.' : autoSave.status === 'unsaved' ? 'Unsaved changes. Finish the field to save.' : autoSave.status === 'error' ? autoSave.error : 'Changes save automatically when you finish editing a field.'}</p>}
                     <form onSubmit={handleSubmit} className="ds-form">
                       <div className="ds-field">
                         <label htmlFor="name" className="ds-label">Route Name</label>
@@ -287,7 +308,8 @@ export default function RoutesPage() {
                           id="name"
                           type="text"
                           value={formData.name}
-                          onChange={(e) => setFormData({...formData, name: e.target.value})}
+                          onChange={(e) => { const next = {...formData, name: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                          onBlur={() => saveRouteEdit(formData)}
                           className="ds-input"
                           required
                           placeholder="Cebu-Bato"
@@ -301,7 +323,8 @@ export default function RoutesPage() {
                             id="fromCity"
                             type="text"
                             value={formData.fromCity}
-                            onChange={(e) => setFormData({...formData, fromCity: e.target.value})}
+                            onChange={(e) => { const next = {...formData, fromCity: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                            onBlur={() => saveRouteEdit(formData)}
                             className="ds-input"
                             required
                             placeholder="Cebu City"
@@ -314,7 +337,8 @@ export default function RoutesPage() {
                             id="toCity"
                             type="text"
                             value={formData.toCity}
-                            onChange={(e) => setFormData({...formData, toCity: e.target.value})}
+                            onChange={(e) => { const next = {...formData, toCity: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                            onBlur={() => saveRouteEdit(formData)}
                             className="ds-input"
                             required
                             placeholder="Bato"
@@ -329,7 +353,8 @@ export default function RoutesPage() {
                             id="distance"
                             type="number"
                             value={formData.distance}
-                            onChange={(e) => setFormData({...formData, distance: e.target.value})}
+                            onChange={(e) => { const next = {...formData, distance: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                            onBlur={() => saveRouteEdit(formData)}
                             className="ds-input"
                             required
                             min="1"
@@ -344,7 +369,8 @@ export default function RoutesPage() {
                             id="basePrice"
                             type="number"
                             value={formData.basePrice}
-                            onChange={(e) => setFormData({...formData, basePrice: e.target.value})}
+                            onChange={(e) => { const next = {...formData, basePrice: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                            onBlur={() => saveRouteEdit(formData)}
                             className="ds-input"
                             required
                             min="1"
@@ -359,7 +385,8 @@ export default function RoutesPage() {
                           id="duration"
                           type="text"
                           value={formData.duration}
-                          onChange={(e) => setFormData({...formData, duration: e.target.value})}
+                          onChange={(e) => { const next = {...formData, duration: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                          onBlur={() => saveRouteEdit(formData)}
                           className="ds-input"
                           required
                           placeholder="5 hours"
@@ -371,7 +398,7 @@ export default function RoutesPage() {
                         <select
                           id="status"
                           value={formData.status}
-                          onChange={(e) => setFormData({...formData, status: e.target.value})}
+                          onChange={(e) => { const next = {...formData, status: e.target.value}; setFormData(next); autoSave.markDirty(); saveRouteEdit(next); }}
                           className="ds-select"
                           required
                         >
@@ -384,9 +411,7 @@ export default function RoutesPage() {
                         <button type="button" onClick={() => setShowModal(false)} className="ds-btn ds-btn-outline">
                           Cancel
                         </button>
-                        <button type="submit" className="ds-btn ds-btn-primary">
-                          {editingRoute ? 'Update Route' : 'Add Route'}
-                        </button>
+                        {!editingRoute && <button type="submit" className="ds-btn ds-btn-primary">Add Route</button>}
                       </div>
                     </form>
                   </div>

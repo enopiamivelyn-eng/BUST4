@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
-import { authenticateRequest } from '@/lib/auth/middleware';
+import { authenticateRequest, isAdmin } from '@/lib/auth/middleware';
+import { databaseRequestError } from '@/lib/db/errors';
+import { Prisma } from '@prisma/client';
 
 /**
  * GET /api/bookings - Get user's bookings
@@ -22,9 +24,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
 
     // Build where clause
-    const where: any = {
-      userId: user.userId,
-    };
+    const where: any = isAdmin(user) ? {} : { userId: user.userId };
 
     if (status) {
       where.status = status;
@@ -33,11 +33,28 @@ export async function GET(request: NextRequest) {
     // Fetch bookings with related data
     const bookings = await prisma.booking.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        userId: true,
+        tripId: true,
+        seatNumber: true,
+        passengerName: true,
+        passengerEmail: true,
+        passengerPhone: true,
+        status: true,
+        paymentStatus: true,
+        paymentMethod: true,
+        totalAmount: true,
+        bookingDate: true,
+        createdAt: true,
         trip: {
-          include: {
-            route: true,
-            bus: true,
+          select: {
+            departureDate: true,
+            departureTime: true,
+            arrivalTime: true,
+            price: true,
+            route: { select: { name: true, fromCity: true, toCity: true } },
+            bus: { select: { busNumber: true, model: true } },
           },
         },
       },
@@ -49,6 +66,7 @@ export async function GET(request: NextRequest) {
     // Format bookings
     const formattedBookings = bookings.map(booking => ({
       id: booking.id,
+      userId: booking.userId,
       tripId: booking.tripId,
       seatNumber: booking.seatNumber,
       passengerName: booking.passengerName,
@@ -65,6 +83,18 @@ export async function GET(request: NextRequest) {
       date: booking.trip.departureDate,
       time: booking.trip.departureTime,
       busNumber: booking.trip.bus.busNumber,
+      trip: {
+        route: {
+          name: booking.trip.route.name,
+          fromCity: booking.trip.route.fromCity,
+          toCity: booking.trip.route.toCity,
+        },
+        departureDate: booking.trip.departureDate,
+        departureTime: booking.trip.departureTime,
+        arrivalTime: booking.trip.arrivalTime,
+        price: booking.trip.price,
+        bus: { busNumber: booking.trip.bus.busNumber, model: booking.trip.bus.model },
+      },
     }));
 
     return NextResponse.json({
@@ -73,9 +103,10 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error fetching bookings:', error);
+    const failure = databaseRequestError(error, 'bookings');
     return NextResponse.json(
-      { error: 'Failed to fetch bookings' },
-      { status: 500 }
+      { error: failure.error },
+      { status: failure.status }
     );
   }
 }
@@ -95,18 +126,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (isAdmin(user)) {
+      return NextResponse.json(
+        { error: 'Administrators manage passenger bookings and cannot create bookings.' },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
     const {
       tripId,
       seatNumber,
+      seatNumbers: requestedSeatNumbers,
       passengerName,
       passengerEmail,
       passengerPhone,
-      paymentMethod,
     } = body;
 
     // Validate required fields
-    if (!tripId || !seatNumber || !passengerName || !passengerEmail || !passengerPhone) {
+    const seatNumbers: string[] = Array.isArray(requestedSeatNumbers)
+      ? requestedSeatNumbers.map((seat: unknown) => typeof seat === 'string' ? seat.trim().toUpperCase() : '')
+      : typeof seatNumber === 'string' ? [seatNumber.trim().toUpperCase()] : [];
+    if (!tripId || seatNumbers.length === 0 || seatNumbers.length > 10 || seatNumbers.some((seat) => !/^[A-Z]\d{1,2}$/.test(seat)) || new Set(seatNumbers).size !== seatNumbers.length || !passengerName || !passengerEmail || !passengerPhone) {
       return NextResponse.json(
         { error: 'All passenger details are required' },
         { status: 400 }
@@ -135,25 +176,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if seats are available
-    if (trip.availableSeats <= 0) {
+    if (trip.availableSeats < seatNumbers.length) {
       return NextResponse.json(
-        { error: 'No seats available for this trip' },
+        { error: `Only ${trip.availableSeats} seats are available for this trip.` },
         { status: 400 }
       );
     }
 
     // Check if seat is already booked
-    const existingBooking = await prisma.booking.findFirst({
-      where: {
-        tripId,
-        seatNumber,
-        status: { not: 'cancelled' },
-      },
+    const existingBookings = await prisma.booking.findMany({
+      where: { tripId, status: { notIn: ['cancelled', 'rejected'] } },
+      select: { seatNumber: true },
     });
-
-    if (existingBooking) {
+    const occupiedSeats = new Set(existingBookings.flatMap((booking) => booking.seatNumber.split(',').map((seat) => seat.trim())));
+    if (seatNumbers.some((seat) => occupiedSeats.has(seat))) {
       return NextResponse.json(
-        { error: 'This seat is already booked' },
+        { error: 'One or more selected seats have just been booked. Choose different seats.' },
         { status: 400 }
       );
     }
@@ -165,14 +203,14 @@ export async function POST(request: NextRequest) {
         data: {
           userId: user.userId,
           tripId,
-          seatNumber,
+          seatNumber: seatNumbers.join(', '),
           passengerName,
           passengerEmail,
           passengerPhone,
-          totalAmount: trip.price,
-          paymentMethod: paymentMethod || null,
-          status: 'confirmed',
-          paymentStatus: paymentMethod ? 'paid' : 'unpaid',
+          totalAmount: trip.price * seatNumbers.length,
+          paymentMethod: null,
+          status: 'pending',
+          paymentStatus: 'unpaid',
         },
       });
 
@@ -180,7 +218,7 @@ export async function POST(request: NextRequest) {
       await tx.trip.update({
         where: { id: tripId },
         data: {
-          availableSeats: trip.availableSeats - 1,
+          availableSeats: trip.availableSeats - seatNumbers.length,
         },
       });
 
@@ -224,6 +262,12 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (error) {
     console.error('Error creating booking:', error);
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003' && String(error.meta?.field_name ?? '').includes('userId')) {
+      return NextResponse.json(
+        { error: 'Your Supabase account is blocked by an outdated booking database constraint. Run supabase-ticket-payment-qr-migration.sql in Supabase SQL Editor, then retry.' },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to create booking' },
       { status: 500 }

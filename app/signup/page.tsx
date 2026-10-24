@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -12,6 +13,10 @@ export default function SignUpPage() {
     fullName: '',
     email: '',
     phone: '',
+    address: '',
+    city: '',
+    postalCode: '',
+    dateOfBirth: '',
     password: '',
     confirmPassword: '',
   });
@@ -61,6 +66,10 @@ export default function SignUpPage() {
           email: form.email,
           password: form.password,
           phone: form.phone,
+          address: form.address,
+          city: form.city,
+          postalCode: form.postalCode,
+          dateOfBirth: form.dateOfBirth,
           role: 'passenger',
         }),
       });
@@ -68,7 +77,11 @@ export default function SignUpPage() {
       const data = await response.json();
 
       if (response.ok) {
-        router.replace('/login?registered=1');
+        if (data.otpRequired) {
+          router.replace(`/verify-otp?email=${encodeURIComponent(form.email.trim())}&flow=signup`);
+        } else {
+          router.replace('/login?registered=1');
+        }
       } else {
         // Show API error
         setApiError(data.error || 'Registration failed. Please try again.');
@@ -83,28 +96,12 @@ export default function SignUpPage() {
 
   return (
     <div className="ds-app ds-app-auth">
-      <GuestNavbar activeLabel="Sign up" />
+      <GuestNavbar activeLabel="Sign up" showSiteLinks activeSiteLabel={null} />
 
       <main className="ds-auth-center">
-        <section className="ds-auth-hero">
-          <h2 className="ds-auth-hero-title">
-            Travel Made
-            <br />
-            Easier
-          </h2>
-          <p className="ds-auth-hero-sub">
-            Book Your Bus Tickets
-            <br />
-            Anytime, Anywhere
-          </p>
-        </section>
-
           <div className="ds-auth-card">
             <div className="ds-auth-icon" aria-hidden="true">
-              <svg width="28" height="28" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <circle cx="10" cy="7" r="3.2" />
-                <path d="M4.5 17c0-3 2.4-5 5.5-5s5.5 2 5.5 5" />
-              </svg>
+              <Image src="/BUSLOGO.png" alt="Bus Ticket" width={512} height={512} />
             </div>
 
             <div className="ds-auth-head">
@@ -163,6 +160,25 @@ export default function SignUpPage() {
                   aria-invalid={Boolean(errors.phone)}
                 />
                 {errors.phone && <p className="ds-error">{errors.phone}</p>}
+              </div>
+
+              <div className="ds-field">
+                <label htmlFor="dateOfBirth" className="ds-label">Date of Birth</label>
+                <input id="dateOfBirth" type="date" value={form.dateOfBirth} onChange={update('dateOfBirth')} className="ds-input" />
+              </div>
+              <div className="ds-field">
+                <label htmlFor="address" className="ds-label">Address</label>
+                <input id="address" type="text" value={form.address} onChange={update('address')} className="ds-input" autoComplete="street-address" />
+              </div>
+              <div className="ds-trip-grid">
+                <div className="ds-field">
+                  <label htmlFor="city" className="ds-label">City</label>
+                  <input id="city" type="text" value={form.city} onChange={update('city')} className="ds-input" autoComplete="address-level2" />
+                </div>
+                <div className="ds-field">
+                  <label htmlFor="postalCode" className="ds-label">Postal Code</label>
+                  <input id="postalCode" type="text" value={form.postalCode} onChange={update('postalCode')} className="ds-input" autoComplete="postal-code" />
+                </div>
               </div>
 
               <div className="ds-field">

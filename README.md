@@ -1,85 +1,27 @@
-# 🚌 Bus Ticketing System
+# Bus Ticketing System
 
-A modern, functional bus ticket booking system built with Next.js, TypeScript, and Prisma.
+A responsive bus ticketing app built with Next.js, TypeScript, Supabase Auth, Supabase PostgreSQL, and Prisma.
 
-## 🎯 Project Status: 50% Functional
+## Quick start
 
-This system includes:
-- ✅ Real database with data persistence
-- ✅ Authentication & authorization
-- ✅ Working booking system
-- ✅ Admin management panel
-- ✅ Professional UI/UX
+1. Install Node.js 20.9+ and run `npm install`.
+2. Configure `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `DATABASE_URL` in `.env.local` and `.env` (see [setup instructions](./SETUP_INSTRUCTIONS.md)).
+3. Run `npm run db:setup` to create the PostgreSQL schema and seed buses, routes, and trips.
+4. Run `npm run dev` and open `http://localhost:3000`.
 
-## 🚀 Quick Start
+## Features
 
-```bash
-# 1. Install dependencies
-npm install
+- Passenger registration with email OTP activation, login OTP, OTP resend, and forgot-password recovery OTP.
+- Admin and passenger roles with protected server routes.
+- Trip search, booking, passenger booking history, and ticket details.
+- Admin CRUD for buses, routes, and trips, plus booking management and reports.
+- User-to-admin support messaging and login activity history.
+- Password security handled by Supabase Auth.
 
-# 2. Setup database with sample data
-npm run db:setup
+Auth accounts are created through the app and Supabase Auth. The bus seed does not create demo login accounts. Follow the setup guide to promote a verified account to admin.
 
-# 3. Start development server
-npm run dev
-```
+## Database
 
-Open [http://localhost:3000](http://localhost:3000)
+Bus, route, trip, and booking records are stored in PostgreSQL and accessed through Prisma. Supabase Auth stores user credentials and roles; `auth_profiles`, `user_login_logs`, and `bus_ticket_messages` support profiles, history, and messaging.
 
-## 🔐 Test Accounts
-
-**Admin:** `admin@busticket.com` / `admin123`  
-**User:** `user@test.com` / `test123`
-
-## 📖 Full Documentation
-
-See [QUICK_START.md](./QUICK_START.md) for complete setup instructions and testing guide.
-
-## 🛠️ Tech Stack
-
-- **Framework:** Next.js 16 with App Router
-- **Language:** TypeScript
-- **Database:** SQLite with Prisma ORM
-- **Authentication:** JWT with HTTP-only cookies
-- **Styling:** Custom CSS with professional design
-
-## 📊 Database Schema
-
-- **Users** - Authentication and user management
-- **Buses** - Fleet management
-- **Routes** - Travel routes and destinations
-- **Trips** - Scheduled bus trips
-- **Bookings** - Ticket reservations
-
-## 🎓 Features for Evaluation
-
-### User Features
-- Search and book tickets
-- View booking history
-- Select payment method
-- Cancel bookings
-- View e-tickets
-
-### Admin Features
-- Manage buses (CRUD)
-- Manage routes (CRUD)
-- Manage trips (CRUD)
-- View all bookings
-- Dashboard overview
-
-## 📝 Development Commands
-
-```bash
-npm run dev          # Start development server
-npm run build        # Build for production
-npm run db:studio    # Open database GUI
-npm run db:setup     # Reset database with seed data
-```
-
-## 📧 Contact
-
-For questions or issues, refer to the setup documentation in QUICK_START.md
-
----
-
-**Built for academic evaluation** - Demonstrates full-stack development, database design, authentication, and professional UI/UX skills.
+For complete Supabase configuration, SQL steps, OTP settings, and admin setup, see [SETUP_INSTRUCTIONS.md](./SETUP_INSTRUCTIONS.md).

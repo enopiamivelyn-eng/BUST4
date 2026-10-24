@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import NotificationBell from './NotificationBell';
 
 interface NavbarProps {
   /** Rendered between the search bar and the status cluster (e.g. Sign in / Log in). */
@@ -71,13 +72,7 @@ export default function Navbar({ actions, user, stats }: NavbarProps) {
 
         {!actions && (
           <>
-            <button type="button" className="ds-bell" aria-label="Notifications">
-              <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 8a4 4 0 1 1 8 0c0 3 1.2 4.2 1.2 4.2H4.8S6 11 6 8Z" />
-                <path d="M8.5 15a1.6 1.6 0 0 0 3 0" />
-              </svg>
-              <span className="ds-bell-dot" />
-            </button>
+            {user && <NotificationBell />}
 
             <Link href={user ? '/profile' : '/login'} className="ds-user">
               <span className="ds-user-avatar" aria-hidden="true">

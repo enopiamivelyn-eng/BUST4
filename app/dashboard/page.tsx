@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Sidebar from '../components/Sidebar';
 import AuthGate from '../components/AuthGate';
 import { useAuth } from '../components/AuthContext';
 import Navbar from '../components/Navbar';
+import { formatScheduleTime } from '@/lib/schedule';
 
 interface DashboardStats {
   totalBookings: number;
@@ -14,11 +15,15 @@ interface DashboardStats {
   totalRoutes: number;
   todayBookings: number;
   upcomingTrips: number;
+  totalSchedules: number;
 }
+
+interface RecentBooking { id: string; from: string; to: string; date: string; time: string; status: string; totalAmount: number; }
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const username = user?.name ?? 'Admin';
+  const username = user?.name ?? 'Account';
+  const isAdmin = user?.role === 'admin';
   
   const [stats, setStats] = useState<DashboardStats>({
     totalBookings: 0,
@@ -26,36 +31,58 @@ export default function DashboardPage() {
     activeBuses: 0,
     totalRoutes: 0,
     todayBookings: 0,
-    upcomingTrips: 0
+    upcomingTrips: 0,
+    totalSchedules: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [statsUserId, setStatsUserId] = useState<string | null>(null);
+  const [recentBookings, setRecentBookings] = useState<RecentBooking[]>([]);
+  const activeUserId = useRef<string | null>(null);
+  const accountDataLoading = loading || statsUserId !== user?.id;
 
   useEffect(() => {
-    fetchDashboardStats();
-    
-    // Refresh stats every 30 seconds for real-time updates
-    const interval = setInterval(fetchDashboardStats, 30000);
-    
-    return () => clearInterval(interval);
-  }, []);
+    activeUserId.current = user?.id ?? null;
+    setStatsUserId(null);
+    setRecentBookings([]);
+    setStats({ totalBookings: 0, totalRevenue: 0, activeBuses: 0, totalRoutes: 0, todayBookings: 0, upcomingTrips: 0, totalSchedules: 0 });
+    if (!user) {
+      setLoading(true);
+      return;
+    }
 
-  const fetchDashboardStats = async () => {
+    setLoading(true);
+    const refresh = () => fetchDashboardStats(user.id, user.role === 'admin');
+    refresh();
+    const interval = setInterval(refresh, 10000);
+    window.addEventListener('app:database-change', refresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('app:database-change', refresh);
+    };
+  }, [user?.id, user?.role]);
+
+  const fetchDashboardStats = async (userId: string, admin: boolean) => {
     try {
-      const [bookingsRes, busesRes, routesRes, tripsRes] = await Promise.all([
+      const requests = [
         fetch('/api/bookings', { credentials: 'include' }),
-        fetch('/api/admin/buses', { credentials: 'include' }),
-        fetch('/api/routes', { credentials: 'include' }),
-        fetch('/api/trips', { credentials: 'include' })
-      ]);
+        admin ? fetch('/api/admin/buses', { credentials: 'include' }) : Promise.resolve(null),
+        admin ? fetch('/api/admin/routes', { credentials: 'include' }) : Promise.resolve(null),
+        admin ? fetch('/api/admin/trips', { credentials: 'include' }) : Promise.resolve(null),
+      ] as const;
+      const [bookingsRes, busesRes, routesRes, tripsRes] = await Promise.all(requests);
+      if (activeUserId.current !== userId) return;
 
       let totalBookings = 0;
       let totalRevenue = 0;
       let todayBookings = 0;
+      let upcomingTrips = 0;
+      let totalSchedules = 0;
       const today = new Date().toISOString().split('T')[0];
 
       if (bookingsRes.ok) {
         const bookingsData = await bookingsRes.json();
         const bookings = bookingsData.bookings || [];
+        setRecentBookings(bookings.slice(0, 5));
         totalBookings = bookings.length;
         
         bookings.forEach((booking: any) => {
@@ -65,43 +92,50 @@ export default function DashboardPage() {
           if (booking.bookingDate.startsWith(today)) {
             todayBookings++;
           }
+          if (booking.status !== 'cancelled' && booking.date >= today) upcomingTrips++;
         });
       }
 
       let activeBuses = 0;
-      if (busesRes.ok) {
+      if (busesRes?.ok) {
         const busesData = await busesRes.json();
         const buses = busesData.buses || [];
         activeBuses = buses.filter((bus: any) => bus.status === 'active').length;
       }
 
       let totalRoutes = 0;
-      if (routesRes.ok) {
+      if (routesRes?.ok) {
         const routesData = await routesRes.json();
         totalRoutes = (routesData.routes || []).length;
       }
 
-      let upcomingTrips = 0;
-      if (tripsRes.ok) {
+      if (tripsRes?.ok) {
         const tripsData = await tripsRes.json();
         const trips = tripsData.trips || [];
-        upcomingTrips = trips.filter((trip: any) => 
+        totalSchedules = trips.length;
+        const availableTrips = trips.filter((trip: any) => 
           trip.status === 'scheduled' && trip.departureDate >= today
         ).length;
+        if (admin) upcomingTrips = availableTrips;
       }
 
+      if (activeUserId.current !== userId) return;
       setStats({
         totalBookings,
         totalRevenue,
         activeBuses,
         totalRoutes,
         todayBookings,
-        upcomingTrips
+        upcomingTrips,
+        totalSchedules
       });
+      setStatsUserId(userId);
     } catch (err) {
+      if (activeUserId.current !== userId) return;
       console.error('Error fetching dashboard stats:', err);
+      setStatsUserId(userId);
     } finally {
-      setLoading(false);
+      if (activeUserId.current === userId) setLoading(false);
     }
   };
 
@@ -112,7 +146,7 @@ export default function DashboardPage() {
   return (
     <AuthGate>
       <div className="ds-app">
-        <Navbar user={{ name: user?.name ?? 'Admin', role: 'Administrator' }} />
+        <Navbar user={{ name: user?.name ?? 'Account', role: isAdmin ? 'Administrator' : 'Passenger' }} />
 
         <div className="ds-app-body">
           <Sidebar isAuthenticated username={username} />
@@ -120,10 +154,10 @@ export default function DashboardPage() {
           <main className="ds-page">
             <div className="ds-mb">
               <h1 className="ds-page-title">Hello, {username}!</h1>
-              <p className="ds-page-sub">Dashboard Overview</p>
+              <p className="ds-page-sub">{isAdmin ? 'System overview' : 'Your account and travel overview'}</p>
             </div>
 
-            {loading ? (
+            {accountDataLoading ? (
               <div className="ds-empty">
                 <div className="loading" style={{ margin: '0 auto' }}></div>
                 <p style={{ marginTop: '1rem', color: 'rgba(255,255,255,0.7)' }}>Loading dashboard...</p>
@@ -132,7 +166,7 @@ export default function DashboardPage() {
               <>
                 {/* Stats Grid */}
                 <div className="ds-stats-grid ds-mb">
-                  <div className="ds-stat-card">
+                  <Link href="/bookings" className="ds-stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                     <div className="ds-stat-icon">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M3 9.5V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3.5" />
@@ -143,9 +177,9 @@ export default function DashboardPage() {
                       <h3 className="ds-stat-value">{stats.totalBookings}</h3>
                       <p className="ds-stat-label">Total Bookings</p>
                     </div>
-                  </div>
+                  </Link>
 
-                  <div className="ds-stat-card">
+                  <Link href={isAdmin ? '/admin/payments' : '/bookings'} className="ds-stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                     <div className="ds-stat-icon">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
@@ -154,11 +188,11 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <h3 className="ds-stat-value">{formatPrice(stats.totalRevenue)}</h3>
-                      <p className="ds-stat-label">Total Revenue</p>
+                      <p className="ds-stat-label">{isAdmin ? 'Total Revenue' : 'Paid Booking Spend'}</p>
                     </div>
-                  </div>
+                  </Link>
 
-                  <div className="ds-stat-card">
+                  {isAdmin && <Link href="/buses" className="ds-stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                     <div className="ds-stat-icon">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <rect x="2.5" y="5" width="19" height="12" rx="2.5" />
@@ -171,9 +205,9 @@ export default function DashboardPage() {
                       <h3 className="ds-stat-value">{stats.activeBuses}</h3>
                       <p className="ds-stat-label">Active Buses</p>
                     </div>
-                  </div>
+                  </Link>}
 
-                  <div className="ds-stat-card">
+                  {isAdmin && <Link href="/routes" className="ds-stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                     <div className="ds-stat-icon">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M10 17.5s5.5-4.6 5.5-8.8A5.5 5.5 0 0 0 4.5 8.7c0 4.2 5.5 8.8 5.5 8.8Z" />
@@ -184,9 +218,9 @@ export default function DashboardPage() {
                       <h3 className="ds-stat-value">{stats.totalRoutes}</h3>
                       <p className="ds-stat-label">Total Routes</p>
                     </div>
-                  </div>
+                  </Link>}
 
-                  <div className="ds-stat-card">
+                  <Link href="/bookings" className="ds-stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                     <div className="ds-stat-icon">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
@@ -197,9 +231,9 @@ export default function DashboardPage() {
                       <h3 className="ds-stat-value">{stats.todayBookings}</h3>
                       <p className="ds-stat-label">Today's Bookings</p>
                     </div>
-                  </div>
+                  </Link>
 
-                  <div className="ds-stat-card">
+                  <Link href={isAdmin ? '/schedules?view=all' : '/search'} className="ds-stat-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                     <div className="ds-stat-icon">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M5 4v8a2 2 0 0 0 2 2h6" />
@@ -208,12 +242,13 @@ export default function DashboardPage() {
                       </svg>
                     </div>
                     <div>
-                      <h3 className="ds-stat-value">{stats.upcomingTrips}</h3>
-                      <p className="ds-stat-label">Upcoming Trips</p>
+                      <h3 className="ds-stat-value">{isAdmin ? stats.totalSchedules : stats.upcomingTrips}</h3>
+                      <p className="ds-stat-label">{isAdmin ? 'Total Schedules' : 'Upcoming Trips'}</p>
                     </div>
-                  </div>
+                  </Link>
                 </div>
 
+                {isAdmin ? <>
                 {/* Quick Actions */}
                 <div className="ds-section-head">
                   <div>
@@ -237,10 +272,10 @@ export default function DashboardPage() {
                     </div>
                   </Link>
 
-                  <Link href="/trips" className="ds-card ds-card-pad" style={{ flex: 1, textDecoration: 'none' }}>
+                  <Link href="/schedules" className="ds-card ds-card-pad" style={{ flex: 1, textDecoration: 'none' }}>
                     <div className="ds-card-head">
-                      <h3 className="ds-card-title">Manage Trips</h3>
-                      <p className="ds-card-sub">Schedule trips and manage availability</p>
+                      <h3 className="ds-card-title">Manage Schedules</h3>
+                      <p className="ds-card-sub">Set departure times and manage seat availability</p>
                     </div>
                   </Link>
                 </div>
@@ -260,6 +295,14 @@ export default function DashboardPage() {
                     </div>
                   </Link>
                 </div>
+                </> : <>
+                  <div className="ds-section-head"><div><h2 className="ds-section-title">Your recent bookings</h2><p className="ds-section-sub">These bookings belong to your signed-in account.</p></div><Link href="/bookings" className="ds-link">View all</Link></div>
+                  {recentBookings.length ? <div className="ds-table-wrap ds-mb"><table className="ds-table"><thead><tr><th>Route</th><th>Date</th><th>Status</th><th>Total</th><th /></tr></thead><tbody>{recentBookings.map((booking) => <tr key={booking.id}><td className="ds-cell-strong">{booking.from} → {booking.to}</td><td>{booking.date} · {formatScheduleTime(booking.time)}</td><td>{booking.status}</td><td>{formatPrice(booking.totalAmount)}</td><td><Link href={`/reservation?bookingId=${encodeURIComponent(booking.id)}`} className="ds-link">Ticket</Link></td></tr>)}</tbody></table></div> : <div className="ds-empty ds-mb"><p>No bookings on this account yet.</p><Link href="/search" className="ds-btn ds-btn-primary">Search trips</Link></div>}
+                  <div className="ds-row">
+                    <Link href="/search" className="ds-card ds-card-pad" style={{ flex: 1, textDecoration: 'none' }}><h3 className="ds-card-title">Search trips</h3><p className="ds-card-sub">Find buses and reserve seats.</p></Link>
+                    <Link href="/profile" className="ds-card ds-card-pad" style={{ flex: 1, textDecoration: 'none' }}><h3 className="ds-card-title">Profile & Settings</h3><p className="ds-card-sub">Update the personal information on your account.</p></Link>
+                  </div>
+                </>}
               </>
             )}
           </main>

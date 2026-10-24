@@ -30,7 +30,7 @@ export async function supabaseAuth<T>(path: string, init: RequestInit = {}): Pro
 export interface SupabaseUser {
   id: string;
   email: string;
-  user_metadata?: { name?: string; phone?: string };
+  user_metadata?: { name?: string; phone?: string; [key: string]: unknown };
   app_metadata?: { role?: string };
   created_at?: string;
 }

@@ -12,6 +12,30 @@ let errors = [];
 let warnings = [];
 let success = [];
 
+// Prisma reads .env for CLI commands, while Next.js reads .env.local.
+// Check both without ever printing the connection string (it contains a secret).
+function hasConfiguredDatabaseUrl(fileName) {
+  const filePath = path.join(__dirname, fileName);
+  if (!fs.existsSync(filePath)) return false;
+
+  const contents = fs.readFileSync(filePath, 'utf8');
+  const match = contents.match(/^\s*DATABASE_URL\s*=\s*['"]?([^\r\n'"]*)/m);
+  const value = match?.[1]?.trim();
+  return Boolean(value && !/YOUR_|placeholder|example/i.test(value));
+}
+
+const databaseUrlInEnv = hasConfiguredDatabaseUrl('.env');
+const databaseUrlInEnvLocal = hasConfiguredDatabaseUrl('.env.local');
+if (databaseUrlInEnv && databaseUrlInEnvLocal) {
+  success.push('Database connection is configured in .env and .env.local');
+} else {
+  const missingFiles = [
+    !databaseUrlInEnv && '.env (Prisma CLI)',
+    !databaseUrlInEnvLocal && '.env.local (Next.js app)',
+  ].filter(Boolean);
+  errors.push(`DATABASE_URL is missing or still a placeholder in ${missingFiles.join(' and ')}`);
+}
+
 // Check 1: Database file exists
 const dbPath = path.join(__dirname, 'prisma', 'dev.db');
 if (fs.existsSync(dbPath)) {

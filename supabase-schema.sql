@@ -1,7 +1,7 @@
 -- ============================================================
--- Bus Ticketing Management System — Supabase schema + seed
--- Mirrors prisma/schema.prisma exactly (UUID text ids, not ints).
--- Safe to re-run: drops and recreates everything.
+-- Bus Ticketing Management System — Supabase PostgreSQL schema + seed
+-- Auth users live in Supabase Auth; this file creates the bus-ticket data tables.
+-- DESTRUCTIVE reset: drops and recreates the bus-ticket tables below.
 -- ============================================================
 
 -- ---------- 1. Clean slate ----------
@@ -9,23 +9,11 @@ drop table if exists public."Booking" cascade;
 drop table if exists public."Trip"    cascade;
 drop table if exists public."Route"   cascade;
 drop table if exists public."Bus"     cascade;
-drop table if exists public."User"    cascade;
 
 -- ---------- 2. Tables ----------
--- Supabase Auth profiles and login-log RLS are set up separately by
+-- Supabase Auth profiles, login history, and messages are set up separately by
 -- supabase-auth-migration.sql. This file resets and reseeds the bus tables;
 -- do not run it against an existing database unless that reset is intended.
-
--- Users: admin + passenger accounts
-create table public."User" (
-  id         text        primary key default gen_random_uuid()::text,
-  email      text        not null unique,
-  password   text        not null,                       -- sha256(password + salt), see lib/auth/password.ts
-  name       text        not null,
-  role       text        not null default 'passenger',   -- 'passenger' | 'admin'
-  "createdAt" timestamptz not null default now(),
-  "updatedAt" timestamptz not null default now()
-);
 
 -- Buses: the fleet
 create table public."Bus" (
@@ -41,7 +29,7 @@ create table public."Bus" (
 -- Routes: origin -> destination with a base fare
 create table public."Route" (
   id          text        primary key default gen_random_uuid()::text,
-  name        text        not null,
+  name        text        not null unique,
   "fromCity"  text        not null,
   "toCity"    text        not null,
   distance    double precision not null,
@@ -70,13 +58,13 @@ create table public."Trip" (
 -- Bookings: a passenger's seat on a trip
 create table public."Booking" (
   id               text        primary key default gen_random_uuid()::text,
-  "userId"         text        not null references public."User"(id) on delete cascade,
+  "userId"         text        not null,
   "tripId"         text        not null references public."Trip"(id) on delete cascade,
   "seatNumber"     text        not null,
   "passengerName"  text        not null,
   "passengerEmail" text        not null,
   "passengerPhone" text        not null,
-  status           text        not null default 'pending',  -- 'pending' | 'confirmed' | 'cancelled'
+  status           text        not null default 'pending',  -- 'pending' | 'approved' | 'complete' | 'rejected' | 'cancelled'
   "paymentStatus"  text        not null default 'unpaid',   -- 'unpaid' | 'paid' | 'refunded'
   "paymentMethod"  text,                                    -- 'GCash' | 'Maya' | 'Cash'
   "totalAmount"    double precision not null,
@@ -85,7 +73,9 @@ create table public."Booking" (
   "updatedAt"      timestamptz not null default now()
 );
 
--- ---------- 3. Indexes (match @@index in Prisma) ----------
+-- ---------- 3. Indexes ----------
+create unique index "Trip_routeId_departureDate_departureTime_key"
+  on public."Trip"("routeId", "departureDate", "departureTime");
 create index "Trip_routeId_idx"        on public."Trip"("routeId");
 create index "Trip_busId_idx"          on public."Trip"("busId");
 create index "Trip_departureDate_idx"  on public."Trip"("departureDate");
@@ -106,24 +96,12 @@ begin
   return new;
 end $$;
 
-create trigger trg_user_updated    before update on public."User"    for each row execute function public.set_updated_at();
 create trigger trg_bus_updated     before update on public."Bus"     for each row execute function public.set_updated_at();
 create trigger trg_route_updated   before update on public."Route"   for each row execute function public.set_updated_at();
 create trigger trg_trip_updated    before update on public."Trip"    for each row execute function public.set_updated_at();
 create trigger trg_booking_updated before update on public."Booking" for each row execute function public.set_updated_at();
 
--- ---------- 5. Seed data ----------
-
--- Passwords are sha256(password + 'SALT_KEY_CHANGE_IN_PRODUCTION'), hex.
--- admin123 -> 8f4b9b0b9c0e1a4a0b2b9f1e4e2a6d3c... (computed to match lib/auth/password.ts)
-insert into public."User" (email, password, name, role) values
-  ('admin@busticket.com',
-   encode(sha256(('admin123' || 'SALT_KEY_CHANGE_IN_PRODUCTION')::bytea), 'hex'),
-   'Admin User', 'admin'),
-  ('user@test.com',
-   encode(sha256(('test123'  || 'SALT_KEY_CHANGE_IN_PRODUCTION')::bytea), 'hex'),
-   'Test User', 'passenger')
-on conflict (email) do update set password = excluded.password;
+-- ---------- 5. Seed bus and route data ----------
 
 -- Buses
 insert into public."Bus" ("busNumber", model, capacity, status) values
@@ -140,7 +118,8 @@ insert into public."Route" (name, "fromCity", "toCity", distance, "basePrice", d
   ('Cebu-Boljoon',   'Cebu City', 'Boljoon',   105.0, 300, '5 hours'),
   ('Cebu-Dalaguete', 'Cebu City', 'Dalaguete',  85.0, 300, '5 hours'),
   ('Cebu-Moalboal',  'Cebu City', 'Moalboal',   89.0, 250, '4 hours'),
-  ('Cebu-Argao',     'Cebu City', 'Argao',      67.0, 280, '4.5 hours');
+  ('Cebu-Argao',     'Cebu City', 'Argao',      67.0, 280, '4.5 hours')
+on conflict (name) do nothing;
 
 -- Trips: next 7 days x first 4 routes x 3 departures
 insert into public."Trip"
@@ -161,35 +140,19 @@ cross join lateral (
   select id, capacity from public."Bus"
   where status = 'active'
   order by md5(random()::text) limit 1
-) b;
+) b
+on conflict ("routeId", "departureDate", "departureTime") do nothing;
 
--- One sample booking so "My Bookings" is not empty on first login
-insert into public."Booking"
-  ("userId", "tripId", "seatNumber", "passengerName", "passengerEmail", "passengerPhone",
-   status, "paymentStatus", "paymentMethod", "totalAmount")
-select
-  u.id,
-  t.id,
-  'A12',
-  'Test User',
-  'user@test.com',
-  '+63 912 345 6789',
-  'confirmed',
-  'paid',
-  'GCash',
-  t.price
-from public."User" u
-cross join lateral (select id, price from public."Trip" order by "departureDate", "departureTime" limit 1) t
-where u.email = 'user@test.com'
-on conflict do nothing;
-
--- Reflect that booking in the trip's seat count
-update public."Trip" set "availableSeats" = "availableSeats" - 1
-where id = (select id from public."Trip" order by "departureDate", "departureTime" limit 1);
+-- These tables are accessed by the server through Prisma's private DB URL.
+-- Do not expose bus, trip, or booking rows through the public API role.
+alter table public."Bus" enable row level security;
+alter table public."Route" enable row level security;
+alter table public."Trip" enable row level security;
+alter table public."Booking" enable row level security;
+revoke all on public."Bus", public."Route", public."Trip", public."Booking" from anon, authenticated;
 
 -- ---------- 6. Verify ----------
-select 'User'    as table_name, count(*) from public."User"
-union all select 'Bus',     count(*) from public."Bus"
+select 'Bus'     as table_name, count(*) from public."Bus"
 union all select 'Route',   count(*) from public."Route"
 union all select 'Trip',    count(*) from public."Trip"
 union all select 'Booking', count(*) from public."Booking";

@@ -36,6 +36,16 @@ export async function PUT(
     }
 
     // If updating bus number, check for conflicts
+    if (busNumber !== undefined && (typeof busNumber !== 'string' || !busNumber.trim())) {
+      return NextResponse.json({ error: 'Enter a bus number.' }, { status: 400 });
+    }
+    if (model !== undefined && (typeof model !== 'string' || !model.trim())) {
+      return NextResponse.json({ error: 'Enter the bus model.' }, { status: 400 });
+    }
+    if (status !== undefined && !['active', 'maintenance', 'inactive'].includes(status)) {
+      return NextResponse.json({ error: 'Choose a valid bus status.' }, { status: 400 });
+    }
+
     if (busNumber && busNumber !== existingBus.busNumber) {
       const conflict = await prisma.bus.findUnique({
         where: { busNumber },
@@ -51,15 +61,40 @@ export async function PUT(
 
     // Build update data
     const updateData: any = {};
-    if (busNumber) updateData.busNumber = busNumber;
-    if (model) updateData.model = model;
-    if (capacity) updateData.capacity = parseInt(capacity);
+    if (busNumber !== undefined) updateData.busNumber = busNumber.trim();
+    if (model !== undefined) updateData.model = model.trim();
+    if (capacity !== undefined) {
+      const nextCapacity = Number(capacity);
+      if (!Number.isInteger(nextCapacity) || nextCapacity < 1) {
+        return NextResponse.json({ error: 'Bus capacity must be a positive whole number.' }, { status: 400 });
+      }
+      updateData.capacity = nextCapacity;
+    }
     if (status) updateData.status = status;
 
-    // Update bus
-    const updatedBus = await prisma.bus.update({
-      where: { id },
-      data: updateData,
+    const tripsToRecalculate = updateData.capacity !== undefined && updateData.capacity !== existingBus.capacity
+      ? await prisma.trip.findMany({
+        where: { busId: id },
+        include: { bookings: { select: { status: true } } },
+      })
+      : [];
+    if (tripsToRecalculate.some((trip) => trip.bookings.filter((booking) => booking.status !== 'cancelled' && booking.status !== 'rejected').length > updateData.capacity)) {
+      return NextResponse.json({ error: 'Bus capacity cannot be lower than the number of active passenger bookings.' }, { status: 400 });
+    }
+
+    // Update the bus and its trips together so seat availability stays consistent.
+    const updatedBus = await prisma.$transaction(async (tx) => {
+      const bus = await tx.bus.update({ where: { id }, data: updateData });
+      if (tripsToRecalculate.length) {
+        await Promise.all(tripsToRecalculate.map((trip) => {
+          const activeBookings = trip.bookings.filter((booking) => booking.status !== 'cancelled' && booking.status !== 'rejected').length;
+          const remainingCapacity = Math.max(0, updateData.capacity - activeBookings);
+          const capacityDelta = updateData.capacity - existingBus.capacity;
+          const availableSeats = Math.min(remainingCapacity, Math.max(0, trip.availableSeats + capacityDelta));
+          return tx.trip.update({ where: { id: trip.id }, data: { availableSeats } });
+        }));
+      }
+      return bus;
     });
 
     return NextResponse.json({

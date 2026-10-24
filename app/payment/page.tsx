@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useCallback, useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 import Sidebar from '../components/Sidebar';
 import AuthGate from '../components/AuthGate';
 import { useAuth } from '../components/AuthContext';
+import { formatScheduleTime } from '@/lib/schedule';
 import Navbar from '../components/Navbar';
 
 interface Booking {
@@ -29,6 +31,7 @@ interface Booking {
     departureTime: string;
     arrivalTime: string;
     price: number;
+    bus?: { busNumber: string; model: string };
   };
 }
 
@@ -81,13 +84,8 @@ function PaymentContent() {
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  useEffect(() => {
-    if (bookingId) {
-      fetchBooking();
-    }
-  }, [bookingId]);
-
-  const fetchBooking = async () => {
+  const fetchBooking = useCallback(async () => {
+    if (!bookingId) { setLoading(false); return; }
     try {
       const response = await fetch(`/api/bookings/${bookingId}`, {
         credentials: 'include'
@@ -99,12 +97,22 @@ function PaymentContent() {
       } else {
         setError('Failed to load booking details');
       }
-    } catch (err) {
+    } catch {
       setError('Network error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [bookingId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void fetchBooking(); }, 0);
+    const refresh = () => { void fetchBooking(); };
+    window.addEventListener('app:database-change', refresh);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('app:database-change', refresh);
+    };
+  }, [fetchBooking]);
 
   const handlePayment = async () => {
     if (!booking) return;
@@ -113,14 +121,13 @@ function PaymentContent() {
     setError('');
 
     try {
-      const response = await fetch(`/api/bookings/${booking.id}`, {
-        method: 'PUT',
+      const response = await fetch('/api/payments', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          paymentStatus: 'paid',
-          paymentMethod: method,
-          status: 'confirmed'
+          bookingId: booking.id,
+          method,
         })
       });
 
@@ -130,7 +137,7 @@ function PaymentContent() {
         const data = await response.json();
         setError(data.error || 'Payment failed');
       }
-    } catch (err) {
+    } catch {
       setError('Network error');
     } finally {
       setIsProcessing(false);
@@ -167,7 +174,7 @@ function PaymentContent() {
           <main className="ds-page">
             <div className="ds-empty">
               <h3>Booking not found</h3>
-              <p>The booking you're looking for doesn't exist.</p>
+              <p>The booking you&apos;re looking for doesn&apos;t exist.</p>
               <button 
                 onClick={() => router.push('/bookings')}
                 className="ds-btn ds-btn-primary"
@@ -219,7 +226,7 @@ function PaymentContent() {
                 </div>
                 <div>
                   <span className="ds-detail-label">Departure</span>
-                  <span className="ds-detail-value">{booking.trip.departureDate} · {booking.trip.departureTime}</span>
+                  <span className="ds-detail-value">{booking.trip.departureDate} · {formatScheduleTime(booking.trip.departureTime)}</span>
                 </div>
                 <div>
                   <span className="ds-detail-label">Seats</span>
@@ -228,6 +235,18 @@ function PaymentContent() {
                 <div>
                   <span className="ds-detail-label">Passenger</span>
                   <span className="ds-detail-value">{booking.passengerName}</span>
+                </div>
+                <div>
+                  <span className="ds-detail-label">Passenger contact</span>
+                  <span className="ds-detail-value">{booking.passengerPhone} · {booking.passengerEmail}</span>
+                </div>
+                <div>
+                  <span className="ds-detail-label">Bus</span>
+                  <span className="ds-detail-value">{booking.trip.bus?.busNumber || 'Bus details'}</span>
+                </div>
+                <div>
+                  <span className="ds-detail-label">Payment status</span>
+                  <span className="ds-detail-value">{booking.paymentStatus}</span>
                 </div>
               </div>
 
@@ -284,7 +303,7 @@ function PaymentContent() {
                 disabled={isProcessing}
                 className="ds-btn ds-btn-primary ds-btn-block"
               >
-                {isProcessing ? 'Processing...' : `Pay ${formatPrice(booking.totalAmount)}`}
+                {isProcessing ? 'Submitting...' : 'Submit for payment verification'}
               </button>
             </section>
 
@@ -295,45 +314,19 @@ function PaymentContent() {
               </div>
 
               <ol className="ds-steps">
-                <li>
-                  <span>1</span>
-                  Select your preferred payment method on the left.
-                </li>
-                <li>
-                  <span>2</span>
-                  Complete the payment using your GCash or Maya wallet.
-                </li>
-                <li>
-                  <span>3</span>
-                  Wait for confirmation — your e-ticket is issued right after.
-                </li>
+                <li><span>1</span>Select a payment method and review the fare.</li>
+                <li><span>2</span>Complete the GCash or Maya transfer, and keep the receipt.</li>
+                <li><span>3</span>An administrator verifies settlement before issuing the boarding ticket.</li>
               </ol>
-
               <div className="ds-secure">
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 20 20"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M10 2.5 16 5v5c0 4-2.6 6.6-6 7.5-3.4-.9-6-3.5-6-7.5V5Z" />
-                  <path d="M7.4 10l1.9 1.9L13 8.3" />
-                </svg>
-                <span>
-                  Your payment is secure and guaranteed. Nothing is charged
-                  until you confirm the transaction.
-                </span>
+                <span>Payment remains pending until verified. Submitting this page does not confirm payment or create a ticket.</span>
               </div>
-
-              <div className="ds-note" style={{ marginTop: '1.2rem' }}>
-                This is a demo payment flow. In production, this would integrate
-                with actual payment gateways like GCash and Maya.
-              </div>
+              {(method === 'gcash' || method === 'maya') && <div className="ds-note" style={{ marginTop: '1.2rem', textAlign: 'center' }}>
+                <p>Scan the Sunrays payment QR, complete your transfer, and keep the receipt.</p>
+                <Image src="/sunrays_receipt_qr.png" alt="Sunrays payment QR code" width={220} height={220} style={{ width: 220, height: 220, objectFit: 'contain', background: 'white', borderRadius: 12, padding: 8 }} />
+                <p>Payment confirmation is handled by an administrator after checking the actual transaction.</p>
+              </div>}
+              {method === 'terminal' && <div className="ds-note" style={{ marginTop: '1.2rem' }}>Pay at the terminal. Staff will verify payment before issuing your boarding ticket.</div>}
             </section>
           </div>
         </main>

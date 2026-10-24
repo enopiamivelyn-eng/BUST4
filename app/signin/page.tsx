@@ -8,7 +8,7 @@ export const metadata = {
 export default function SignInPage() {
   return (
     <div className="ds-app ds-app-auth">
-      <GuestNavbar activeLabel="Log in" />
+      <GuestNavbar activeLabel="Log in" showSiteLinks activeSiteLabel={null} />
 
       <main className="ds-auth-center">
         <section className="ds-auth-hero">

@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Sidebar from '../components/Sidebar';
 import AuthGate from '../components/AuthGate';
 import { useAuth } from '../components/AuthContext';
+import { formatScheduleTime } from '@/lib/schedule';
+import { normalizeBookedSeatNumbers, toggleSeatSelection } from '@/lib/seats';
 import Navbar from '../components/Navbar';
 import { formatPrice } from '@/lib/routes';
 
@@ -18,6 +20,7 @@ interface Trip {
   arrivalTime: string;
   price: number;
   availableSeats: number;
+  bookedSeatNumbers?: string[];
   routeName: string;
   from: string;
   to: string;
@@ -32,6 +35,7 @@ function BookingFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tripId = searchParams.get('tripId');
+  const dateParam = searchParams.get('date');
   
   const { user } = useAuth();
   const username = user?.name ?? 'Traveller';
@@ -43,7 +47,7 @@ function BookingFormContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [selectedTripId, setSelectedTripId] = useState(tripId || '');
-  const [passengers, setPassengers] = useState(1);
+  const [passengers, setPassengers] = useState(() => Math.max(1, Math.min(10, Number(searchParams.get('passengers')) || 1)));
   const [seatNumbers, setSeatNumbers] = useState<string[]>([]);
   const [passengerName, setPassengerName] = useState(user?.name || '');
   const [contactNumber, setContactNumber] = useState('');
@@ -53,8 +57,8 @@ function BookingFormContent() {
   useEffect(() => {
     const fetchTrips = async () => {
       try {
-        const today = new Date().toISOString().split('T')[0];
-        const response = await fetch(`/api/trips?date=${today}`);
+        const tripDate = dateParam || new Date().toISOString().split('T')[0];
+        const response = await fetch(`/api/trips?date=${encodeURIComponent(tripDate)}&passengers=${passengers}`);
         
         if (response.ok) {
           const data = await response.json();
@@ -82,10 +86,13 @@ function BookingFormContent() {
     fetchTrips();
     
     // Poll for real-time seat updates every 30 seconds
-    const interval = setInterval(fetchTrips, 30000);
-    
-    return () => clearInterval(interval);
-  }, [tripId]);
+    const interval = setInterval(fetchTrips, 10000);
+    window.addEventListener('app:database-change', fetchTrips);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('app:database-change', fetchTrips);
+    };
+  }, [tripId, dateParam, passengers]);
 
   // Update selected trip when selection changes
   useEffect(() => {
@@ -95,17 +102,13 @@ function BookingFormContent() {
       
       // Auto-generate seat numbers when passengers change
       if (trip) {
-        const bookedSeats = trip.capacity - trip.availableSeats;
-        const newSeats: string[] = [];
-        for (let i = 0; i < passengers; i++) {
-          newSeats.push(`${String.fromCharCode(65 + Math.floor((bookedSeats + i) / 4))}${((bookedSeats + i) % 4) + 1}`);
-        }
-        setSeatNumbers(newSeats);
+        setSeatNumbers((current) => current.filter((seat) => !trip.bookedSeatNumbers?.includes(seat)).slice(0, passengers));
       }
     }
   }, [selectedTripId, passengers, trips]);
 
   const totalPrice = selectedTrip ? selectedTrip.price * passengers : 0;
+  const takenSeatNumbers = normalizeBookedSeatNumbers(selectedTrip?.bookedSeatNumbers);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,6 +123,24 @@ function BookingFormContent() {
       return;
     }
 
+    if (seatNumbers.length !== passengers) {
+      setError(`Select ${passengers} available seat${passengers === 1 ? '' : 's'} to continue.`);
+      return;
+    }
+
+    if (!passengerName.trim()) {
+      setError('Enter the lead passenger name to continue.');
+      return;
+    }
+    if (!contactNumber.trim()) {
+      setError('Enter a contact number to continue.');
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setError('Enter a valid email address to continue.');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
 
@@ -131,33 +152,34 @@ function BookingFormContent() {
         body: JSON.stringify({
           tripId: selectedTrip.id,
           seatNumber: seatNumbers[0] || 'A1',
-          passengerName,
-          passengerEmail: email,
-          passengerPhone: contactNumber,
+          seatNumbers,
+          passengerName: passengerName.trim(),
+          passengerEmail: email.trim(),
+          passengerPhone: contactNumber.trim(),
         }),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
-        // Redirect to payment page with booking ID
+      if (response.ok && data.booking?.id) {
         router.push(`/payment?bookingId=${data.booking.id}`);
       } else {
-        setError(data.error || 'Failed to create booking');
+        setError(data.error || 'Your booking was not created. Please review your trip and passenger details and try again.');
       }
-    } catch (err) {
-      console.error('Error creating booking:', err);
-      setError('Network error. Please try again.');
+    } catch (requestError) {
+      console.error('Error creating booking:', requestError);
+      setError('Could not reach the booking service. Check your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const formatDateTime = (dateString: string) => {
-    const date = new Date(dateString);
+    const [dateValue, timeValue = ''] = dateString.split('T');
+    const date = new Date(`${dateValue}T12:00:00`);
     return {
       date: date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
-      time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      time: formatScheduleTime(timeValue),
     };
   };
 
@@ -201,7 +223,7 @@ function BookingFormContent() {
               </div>
             ) : (
               <div className="ds-pay-grid">
-                <form onSubmit={handleSubmit} className="ds-form">
+                <form onSubmit={handleSubmit} className="ds-form" noValidate>
                   {/* Trip details */}
                   <div className="ds-card ds-card-pad">
                     <div className="ds-card-head">
@@ -214,7 +236,7 @@ function BookingFormContent() {
                         <select
                           id="trip"
                           value={selectedTripId}
-                          onChange={(e) => setSelectedTripId(e.target.value)}
+                          onChange={(e) => { setSeatNumbers([]); setSelectedTripId(e.target.value); }}
                           className="ds-select"
                           required
                         >
@@ -248,6 +270,18 @@ function BookingFormContent() {
                           </p>
                         )}
                       </div>
+                      {selectedTrip && <div className="ds-field">
+                        <span className="ds-label">Choose {passengers} seat{passengers === 1 ? '' : 's'} *</span>
+                        <div className="ds-seat-picker" role="group" aria-label="Choose seats">
+                          {Array.from({ length: selectedTrip.capacity }, (_, index) => {
+                            const seat = `${String.fromCharCode(65 + Math.floor(index / 4))}${(index % 4) + 1}`;
+                            const booked = takenSeatNumbers.has(seat);
+                            const chosen = seatNumbers.includes(seat);
+                            return <button key={seat} type="button" disabled={booked} aria-disabled={booked} aria-label={`Seat ${seat}${booked ? ', already taken' : chosen ? ', selected' : ', available'}`} aria-pressed={chosen} className={`ds-seat ${chosen ? 'is-selected' : ''} ${booked ? 'is-booked' : ''}`} onClick={() => setSeatNumbers((current) => toggleSeatSelection(current, seat, passengers))}>{seat}</button>;
+                          })}
+                        </div>
+                        <p className="ds-note">Selected {seatNumbers.length} of {passengers}. Gray seats are already booked. Tap any other available seat to change your selection.</p>
+                      </div>}
                     </div>
                   </div>
 
@@ -258,8 +292,9 @@ function BookingFormContent() {
                     </div>
 
                     <div className="ds-form" style={{ gap: '0.9rem' }}>
+                      <p className="ds-note">For a group booking, the contact details below belong to the lead passenger. Each selected seat is included on the group ticket.</p>
                       <div className="ds-field">
-                        <label htmlFor="name" className="ds-label">Full Name *</label>
+                        <label htmlFor="name" className="ds-label">Lead Passenger Name *</label>
                         <input
                           type="text"
                           id="name"

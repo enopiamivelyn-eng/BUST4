@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -9,13 +10,23 @@ import PasswordVisibilityToggle from '../components/PasswordVisibilityToggle';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { user, loading, signIn } = useAuth();
+  const { user, loading, signIn, refreshUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [otpRequired, setOtpRequired] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [isResending, setIsResending] = useState(false);
+  const [resendSeconds, setResendSeconds] = useState(0);
+
+  useEffect(() => {
+    if (resendSeconds <= 0) return;
+    const timer = window.setTimeout(() => setResendSeconds((seconds) => seconds - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendSeconds]);
 
   // A valid session goes straight to the protected dashboard.
   useEffect(() => {
@@ -28,12 +39,26 @@ export default function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      const result = await signIn(email, password);
-      
-      if (result.success) {
+      if (otpRequired) {
+        const response = await fetch('/api/auth/login', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email, token: otp }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          setError(data.error || 'The code is invalid or expired.');
+          return;
+        }
+        await refreshUser();
         router.replace('/dashboard');
       } else {
-        setError(result.error || 'Login failed. Please try again.');
+        const result = await signIn(email, password);
+        if (result.success && result.otpRequired) {
+          setOtpRequired(true);
+          setResendSeconds(60);
+        } else setError(result.error || 'Login failed. Please try again.');
       }
     } catch (err) {
       setError('An unexpected error occurred. Please try again.');
@@ -42,38 +67,39 @@ export default function LoginPage() {
     }
   };
 
+  const resendOtp = async () => {
+    setError('');
+    setIsResending(true);
+    try {
+      const response = await fetch('/api/auth/resend-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, flow: 'login' }),
+      });
+      const data = await response.json();
+      if (!response.ok) setError(data.error || 'Could not resend the code.');
+      else setResendSeconds(60);
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setIsResending(false);
+    }
+  };
+
   return (
     <div className="ds-app ds-app-auth">
-      <GuestNavbar activeLabel="Log in" />
+      <GuestNavbar activeLabel="Log in" showSiteLinks activeSiteLabel={null} />
 
       <main className="ds-auth-center">
-        <section className="ds-auth-hero">
-          <h2 className="ds-auth-hero-title">
-            Travel Made
-            <br />
-            Easier
-          </h2>
-          <p className="ds-auth-hero-sub">
-            Book Your Bus Tickets
-            <br />
-            Anytime, Anywhere
-          </p>
-        </section>
-
           <div className="ds-auth-card">
             <div className="ds-auth-icon" aria-hidden="true">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="5" width="18" height="12" rx="2.5" />
-                <path d="M3 11h18" />
-                <circle cx="7.5" cy="19" r="1.6" />
-                <circle cx="16.5" cy="19" r="1.6" />
-              </svg>
+              <Image src="/BUSLOGO.png" alt="Bus Ticket" width={512} height={512} />
             </div>
 
             <div className="ds-auth-head">
               <h1 className="ds-auth-title">Welcome Back!</h1>
               <p className="ds-auth-sub">
-                Log in to your account and continue booking your next trip.
+                {otpRequired ? `Enter the verification code sent to ${email}.` : 'Log in to your account and continue booking your next trip.'}
               </p>
             </div>
 
@@ -88,6 +114,7 @@ export default function LoginPage() {
                 </div>
               )}
 
+              {!otpRequired && <>
               <div className="ds-field">
                 <label htmlFor="email" className="ds-label">Email</label>
                 <span className="ds-input-wrap">
@@ -147,16 +174,40 @@ export default function LoginPage() {
                   Forgot password?
                 </Link>
               </div>
+              </>}
+
+              {otpRequired && <div className="ds-field">
+                <label htmlFor="login-otp" className="ds-label">Email verification code</label>
+                <input
+                  id="login-otp"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="([0-9]{6}|[0-9]{8})"
+                  maxLength={8}
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                  placeholder="Enter verification code"
+                  className="ds-input"
+                  required
+                />
+                <button type="button" className="ds-link" onClick={resendOtp} disabled={isResending || resendSeconds > 0}>
+                  {isResending ? 'Sending…' : 'Resend code'}
+                </button>
+                {resendSeconds > 0 && <span aria-live="polite">Resend code available in {resendSeconds}s</span>}
+              </div>}
 
               <button type="submit" className="ds-btn ds-btn-primary ds-btn-block" disabled={isSubmitting}>
-                {isSubmitting ? 'Logging in...' : 'Log in'}
+                {isSubmitting ? (otpRequired ? 'Verifying…' : 'Sending code…') : (otpRequired ? 'Verify and log in' : 'Log in')}
               </button>
 
+              {!otpRequired && <>
               <div className="ds-divider">or</div>
 
               <Link href="/signup" className="ds-btn ds-btn-outline ds-btn-block">
                 Create New Account
               </Link>
+              </>}
             </form>
           </div>
         </main>

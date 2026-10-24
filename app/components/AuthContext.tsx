@@ -6,14 +6,20 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+const DATABASE_CHANGE_EVENT = 'app:database-change';
 
 export interface SessionUser {
   id: string;
   name: string;
   email: string;
   role: string;
+  phone?: string;
+  photoUrl?: string;
 }
 
 interface AuthContextValue {
@@ -22,7 +28,7 @@ interface AuthContextValue {
   /** True until the initial session check completes — avoids flicker/redirect races. */
   loading: boolean;
   /** Sign in with email and password - calls real API */
-  signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signIn: (email: string, password: string) => Promise<{ success: boolean; otpRequired?: boolean; error?: string }>;
   /** Sign out - calls real API logout endpoint */
   signOut: () => Promise<void>;
   /** Refresh user data from server */
@@ -31,15 +37,48 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+  realtimeConfig,
+}: {
+  children: React.ReactNode;
+  realtimeConfig: { url: string; anonKey: string };
+}) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const sessionVersion = useRef(0);
+
+  // Subscribe to a payload-free Supabase Broadcast. Database triggers publish
+  // only an invalidation event; pages refetch their authorized API data.
+  useEffect(() => {
+    if (!realtimeConfig.url || !realtimeConfig.anonKey) return;
+    const supabase = createClient(realtimeConfig.url, realtimeConfig.anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+    });
+    let dispatchTimer: number | undefined;
+    const channel = supabase
+      .channel('app-data', { config: { private: false } })
+      .on('broadcast', { event: 'db-change' }, () => {
+        window.clearTimeout(dispatchTimer);
+        dispatchTimer = window.setTimeout(() => {
+          window.dispatchEvent(new Event(DATABASE_CHANGE_EVENT));
+        }, 150);
+      })
+      .subscribe();
+
+    return () => {
+      window.clearTimeout(dispatchTimer);
+      void supabase.removeChannel(channel);
+    };
+  }, [realtimeConfig.url, realtimeConfig.anonKey]);
 
   // Check if user is already authenticated by calling GET /api/auth/me
   const checkSession = useCallback(async () => {
+    const version = sessionVersion.current;
     try {
       const response = await fetch('/api/auth/me', {
         credentials: 'include', // Include cookies
+        cache: 'no-store',
       });
 
       // A 401 is the normal answer for a signed-out visitor — every public page
@@ -47,15 +86,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // of letting the browser log a failed request on each visit.
       if (response.ok) {
         const data = await response.json();
-        setUser(data.user);
+        if (version === sessionVersion.current) setUser(data.user);
       } else {
-        setUser(null);
+        if (version === sessionVersion.current) setUser(null);
       }
     } catch {
       // Network-level failure (offline, server restarting) — treat as signed out.
-      setUser(null);
+      if (version === sessionVersion.current) setUser(null);
     } finally {
-      setLoading(false);
+      if (version === sessionVersion.current) setLoading(false);
     }
   }, []);
 
@@ -77,8 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await response.json();
 
       if (response.ok) {
-        setUser(data.user);
-        return { success: true };
+        return { success: true, otpRequired: Boolean(data.otpRequired) };
       } else {
         return { success: false, error: data.error || 'Login failed' };
       }
@@ -90,6 +128,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Sign out - call logout API
   const signOut = useCallback(async () => {
+    sessionVersion.current += 1;
+    setUser(null);
+    setLoading(false);
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
@@ -98,7 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      setUser(null);
+      // Clear any identity immediately; the server also expires the cookie.
     }
   }, []);
 

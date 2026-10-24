@@ -11,10 +11,10 @@ export default function LogoBadge() {
     <Link href="/" className="logo-link">
       <div className="logo-small">
         <Image
-          src="/hero-bus.png"
+          src="/BUSLOGO.png"
           alt=""
-          width={499}
-          height={499}
+          width={512}
+          height={512}
           className="logo-small-image"
         />
       </div>

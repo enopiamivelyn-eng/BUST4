@@ -59,6 +59,12 @@ const icons: Record<string, ReactNode> = {
       <path d="M3.5 9h13" />
     </>
   ),
+  ticket: (
+    <>
+      <path d="M3 6h14v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z" />
+      <path d="M10 7v2M10 12v2" />
+    </>
+  ),
   reservations: (
     <>
       <path d="M3 8.5V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2.5" />
@@ -81,6 +87,12 @@ const icons: Record<string, ReactNode> = {
       <path d="M14.5 12.6c1.6.4 2.7 1.5 2.7 3.2" />
     </>
   ),
+  messages: (
+    <>
+      <path d="M3 4.5h14v10H9l-4.5 3v-3H3z" />
+      <path d="M6 8h8M6 11h5" />
+    </>
+  ),
   reports: (
     <>
       <rect x="3" y="3" width="14" height="14" rx="2.5" />
@@ -94,20 +106,6 @@ const icons: Record<string, ReactNode> = {
     </>
   ),
 };
-
-const navLinks = [
-  { href: '/home', label: 'Home', icon: 'home' },
-  { href: '/routes', label: 'Routes', icon: 'routes' },
-  { href: '/buses', label: 'Buses', icon: 'buses' },
-  { href: '/trips', label: 'Trips', icon: 'trips' },
-  { href: '/book-details', label: 'Seats', icon: 'seats' },
-  { href: '/bookings', label: 'Bookings', icon: 'bookings' },
-  { href: '/reservation', label: 'Reservations', icon: 'reservations' },
-  { href: '/payment', label: 'Payments', icon: 'payments' },
-  { href: '/users', label: 'Users', icon: 'users' },
-  { href: '/reports', label: 'Reports', icon: 'reports' },
-  { href: '/profile', label: 'Settings', icon: 'settings' },
-];
 
 function NavIcon({ name }: { name: string }) {
   return (
@@ -138,12 +136,38 @@ export default function Sidebar({
   // The sidebar is only ever mounted for a signed-in user, so the session name
   // is the source of truth here rather than the prop.
   const displayName = user?.name ?? username;
+  const customerLinks = [
+    { href: '/home', label: 'Home', icon: 'home' },
+    { href: '/about', label: 'About Us', icon: 'routes' },
+    { href: '/search', label: 'Search Trips', icon: 'trips' },
+    { href: '/bookings', label: 'My Bookings', icon: 'bookings' },
+    { href: '/my-ticket', label: 'My Ticket', icon: 'ticket' },
+    { href: '/reservations', label: 'Reservations', icon: 'reservations' },
+    { href: '/messages', label: 'Messages', icon: 'messages' },
+    { href: '/settings', label: 'Settings', icon: 'settings' },
+    { href: '/profile', label: 'Profile', icon: 'users' },
+  ];
+  const adminLinks = [
+    { href: '/dashboard', label: 'Dashboard', icon: 'home' },
+    { href: '/buses', label: 'Manage Buses', icon: 'buses' },
+    { href: '/routes', label: 'Manage Routes', icon: 'routes' },
+    { href: '/schedules', label: 'Schedules', icon: 'trips' },
+    { href: '/bookings', label: 'Manage Bookings', icon: 'bookings' },
+    { href: '/admin/payments', label: 'Review Payments', icon: 'payments' },
+    { href: '/admin/scan-tickets', label: 'Scan Tickets', icon: 'ticket' },
+    { href: '/users', label: 'Manage Users', icon: 'users' },
+    { href: '/reports', label: 'Reports', icon: 'reports' },
+    { href: '/messages', label: 'Messages', icon: 'messages' },
+    { href: '/settings', label: 'Settings', icon: 'settings' },
+    { href: '/profile', label: 'Profile', icon: 'users' },
+  ];
+  const visibleNavLinks = user?.role === 'admin' ? adminLinks : customerLinks;
 
   const isActive = (path: string) =>
     path === '/home' ? pathname === '/home' : pathname.startsWith(path);
 
-  const handleSignOut = () => {
-    signOut();
+  const handleSignOut = async () => {
+    await signOut();
     router.replace('/login');
   };
 
@@ -152,7 +176,7 @@ export default function Sidebar({
       {/* Brand lockup */}
       <div className="ds-sidebar-brand">
         <div className="ds-sidebar-logo">
-          <Image src="/hero-bus.png" alt="" width={499} height={499} priority />
+          <Image src="/BUSLOGO.png" alt="Bus Ticket" width={512} height={512} priority />
         </div>
         <div className="ds-sidebar-brand-text">
           <strong>Bus Ticket</strong>
@@ -162,9 +186,7 @@ export default function Sidebar({
 
       {/* Navigation menu */}
       <nav className="ds-nav-list" aria-label="Main">
-        {navLinks
-          .filter((link) => link.href !== '/users' || user?.role === 'admin')
-          .map((link) => (
+        {visibleNavLinks.map((link) => (
           <Link
             key={link.href}
             href={link.href}

@@ -4,19 +4,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
-}
-
-model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  password      String
-  name          String
-  role          String    @default("passenger") // "passenger" or "admin"
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  bookings      Booking[]
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Bus {
@@ -25,22 +14,22 @@ model Bus {
   model         String
   capacity      Int
   status        String    @default("active") // "active", "maintenance", "inactive"
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
   trips         Trip[]
 }
 
 model Route {
   id            String    @id @default(uuid())
-  name          String
+  name          String    @unique
   fromCity      String
   toCity        String
   distance      Float
   basePrice     Float
   duration      String
   status        String    @default("active") // "active", "inactive"
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
   trips         Trip[]
 }
 
@@ -54,8 +43,8 @@ model Trip {
   price           Float
   availableSeats  Int
   status          String    @default("scheduled") // "scheduled", "completed", "cancelled"
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
   route           Route     @relation(fields: [routeId], references: [id])
   bus             Bus       @relation(fields: [busId], references: [id])
   bookings        Booking[]
@@ -63,6 +52,8 @@ model Trip {
   @@index([routeId])
   @@index([busId])
   @@index([departureDate])
+  @@unique([routeId, departureDate, departureTime])
+  @@unique([busId, departureDate, departureTime])
 }
 
 model Booking {
@@ -73,14 +64,15 @@ model Booking {
   passengerName   String
   passengerEmail  String
   passengerPhone  String
-  status          String    @default("pending") // "pending", "confirmed", "cancelled"
+  status          String    @default("pending") // "pending", "approved", "complete", "rejected", "cancelled"
   paymentStatus   String    @default("unpaid") // "unpaid", "paid", "refunded"
   paymentMethod   String?   // "GCash", "Maya", "Cash"
+  ticketToken     String?   @unique
+  checkedInAt     DateTime? @db.Timestamptz(6)
   totalAmount     Float
-  bookingDate     DateTime  @default(now())
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  user            User      @relation(fields: [userId], references: [id])
+  bookingDate     DateTime  @default(now()) @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
   trip            Trip      @relation(fields: [tripId], references: [id])
 
   @@index([userId])

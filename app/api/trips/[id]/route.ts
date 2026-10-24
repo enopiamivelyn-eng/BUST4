@@ -34,8 +34,8 @@ export async function GET(
 
     // Get booked seat numbers
     const bookedSeats = trip.bookings
-      .filter(b => b.status !== 'cancelled')
-      .map(b => b.seatNumber);
+      .filter(b => b.status !== 'cancelled' && b.status !== 'rejected')
+      .flatMap(b => b.seatNumber.split(',').map(seat => seat.trim().toUpperCase()).filter(Boolean));
 
     return NextResponse.json({
       success: true,
@@ -55,6 +55,7 @@ export async function GET(
         duration: trip.route.duration,
         status: trip.status,
         bookedSeats,
+        bookedSeatNumbers: bookedSeats,
       },
     });
   } catch (error) {

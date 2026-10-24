@@ -2,6 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { authenticateRequest, isAdmin } from '@/lib/auth/middleware';
 
+/** GET /api/admin/routes - List every route, including inactive routes. */
+export async function GET(request: NextRequest) {
+  try {
+    const { user, error } = await authenticateRequest(request);
+    if (error || !user || !isAdmin(user)) {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    }
+
+    const routes = await prisma.route.findMany({
+      include: { _count: { select: { trips: true } } },
+      orderBy: { name: 'asc' },
+    });
+    return NextResponse.json({ success: true, routes });
+  } catch (error) {
+    console.error('Error fetching admin routes:', error);
+    return NextResponse.json({ error: 'Failed to fetch routes' }, { status: 500 });
+  }
+}
+
 /**
  * POST /api/admin/routes - Create new route (Admin only)
  */

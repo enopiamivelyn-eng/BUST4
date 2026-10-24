@@ -5,6 +5,8 @@ import Sidebar from '../components/Sidebar';
 import AuthGate from '../components/AuthGate';
 import { useAuth } from '../components/AuthContext';
 import Navbar from '../components/Navbar';
+import { useRouter } from 'next/navigation';
+import { useAutoSave } from '../components/useAutoSave';
 
 interface Bus {
   id: string;
@@ -23,9 +25,11 @@ const statusClass = (status: string) => {
 };
 
 export default function BusesPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const username = user?.name ?? 'Traveller';
   const isAdmin = user?.role === 'admin';
+  useEffect(() => { if (user && !isAdmin) router.replace('/home'); }, [user, isAdmin, router]);
   
   const [buses, setBuses] = useState<Bus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,10 +43,28 @@ export default function BusesPage() {
     capacity: '',
     status: 'active'
   });
+  const autoSave = useAutoSave();
 
   useEffect(() => {
     fetchBuses();
+    const interval = window.setInterval(() => void fetchBuses(), 10000);
+    const refresh = () => void fetchBuses();
+    window.addEventListener('app:database-change', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('app:database-change', refresh);
+    };
   }, []);
+
+  const saveBusEdit = (values: typeof formData) => {
+    if (!editingBus) return;
+    void autoSave.save(`/api/admin/buses/${editingBus.id}`, {
+      busNumber: values.busNumber,
+      model: values.model,
+      capacity: Number(values.capacity),
+      status: values.status,
+    }).then(() => void fetchBuses());
+  };
 
   const fetchBuses = async () => {
     try {
@@ -66,16 +88,14 @@ export default function BusesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (editingBus) {
+      saveBusEdit(formData);
+      return;
+    }
 
     try {
-      const url = editingBus 
-        ? `/api/admin/buses/${editingBus.id}`
-        : '/api/admin/buses';
-      
-      const method = editingBus ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method,
+      const response = await fetch('/api/admin/buses', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
@@ -101,6 +121,7 @@ export default function BusesPage() {
   };
 
   const handleEdit = (bus: Bus) => {
+    autoSave.reset();
     setEditingBus(bus);
     setFormData({
       busNumber: bus.busNumber,
@@ -264,6 +285,7 @@ export default function BusesPage() {
                   </div>
                   
                   <div className="ds-modal-body">
+                    {editingBus && <p className="ds-note" role="status" aria-live="polite">{autoSave.status === 'saving' ? 'Saving...' : autoSave.status === 'saved' ? 'Saved successfully.' : autoSave.status === 'unsaved' ? 'Unsaved changes. Finish the field to save.' : autoSave.status === 'error' ? autoSave.error : 'Changes save automatically when you finish editing a field.'}</p>}
                     <form onSubmit={handleSubmit} className="ds-form">
                       <div className="ds-field">
                         <label htmlFor="busNumber" className="ds-label">Bus Number</label>
@@ -271,7 +293,8 @@ export default function BusesPage() {
                           id="busNumber"
                           type="text"
                           value={formData.busNumber}
-                          onChange={(e) => setFormData({...formData, busNumber: e.target.value})}
+                          onChange={(e) => { const next = {...formData, busNumber: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                          onBlur={() => saveBusEdit(formData)}
                           className="ds-input"
                           required
                           placeholder="BUS-001"
@@ -284,7 +307,8 @@ export default function BusesPage() {
                           id="model"
                           type="text"
                           value={formData.model}
-                          onChange={(e) => setFormData({...formData, model: e.target.value})}
+                          onChange={(e) => { const next = {...formData, model: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                          onBlur={() => saveBusEdit(formData)}
                           className="ds-input"
                           required
                           placeholder="Hino Grand Cruiser"
@@ -297,7 +321,8 @@ export default function BusesPage() {
                           id="capacity"
                           type="number"
                           value={formData.capacity}
-                          onChange={(e) => setFormData({...formData, capacity: e.target.value})}
+                          onChange={(e) => { const next = {...formData, capacity: e.target.value}; setFormData(next); autoSave.markDirty(); }}
+                          onBlur={() => saveBusEdit(formData)}
                           className="ds-input"
                           required
                           min="1"
@@ -310,7 +335,7 @@ export default function BusesPage() {
                         <select
                           id="status"
                           value={formData.status}
-                          onChange={(e) => setFormData({...formData, status: e.target.value})}
+                          onChange={(e) => { const next = {...formData, status: e.target.value}; setFormData(next); autoSave.markDirty(); saveBusEdit(next); }}
                           className="ds-select"
                           required
                         >
@@ -324,9 +349,7 @@ export default function BusesPage() {
                         <button type="button" onClick={() => setShowModal(false)} className="ds-btn ds-btn-outline">
                           Cancel
                         </button>
-                        <button type="submit" className="ds-btn ds-btn-primary">
-                          {editingBus ? 'Update Bus' : 'Add Bus'}
-                        </button>
+                        {!editingBus && <button type="submit" className="ds-btn ds-btn-primary">Add Bus</button>}
                       </div>
                     </form>
                   </div>

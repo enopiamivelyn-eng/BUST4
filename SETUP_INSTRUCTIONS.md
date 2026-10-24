@@ -1,151 +1,92 @@
-# Bus Ticketing System - Setup Instructions
+# Bus Ticketing System Setup
 
-## Prerequisites
-- Node.js 18+ installed
-- npm or yarn
+This project uses Supabase Auth for accounts and email OTP, Supabase PostgreSQL for bus-ticket data, and Prisma for server-side database access.
 
-## Installation Steps
+## 1. Install the project
 
-### 1. Install Dependencies
+Use Node.js 20.9 or newer, then run:
+
 ```bash
 npm install
 ```
 
-### 2. Setup Database
-This will create the SQLite database and populate it with seed data:
+## 2. Configure Supabase
+
+Create a Supabase project. In **Project Settings → API**, copy the Project URL and anon key. In **Project Settings → Database → Connection string**, copy the PostgreSQL URI. Use a direct or session-pooler URI compatible with Prisma.
+
+Set these values in `ticket/.env.local` for the Next.js app and in `ticket/.env` for Prisma CLI commands:
+
+```env
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+DATABASE_URL=postgresql://postgres:YOUR_DATABASE_PASSWORD@YOUR_DATABASE_HOST:5432/postgres?sslmode=require
+```
+
+Keep the real values private. These environment files are excluded from Git. Never put the database connection string or a Supabase service-role key in browser code.
+
+## 3. Create the database tables
+
+The Prisma schema is the source of truth for buses, routes, trips, and bookings. Create those PostgreSQL tables and seed the bus catalog with:
+
 ```bash
 npm run db:setup
 ```
 
-Or run separately:
-```bash
-npm run db:push      # Create database tables
-npm run db:seed      # Add sample data
+If this Supabase project already contains the older quoted `public."User"` table or existing bus-ticket data, back up the project first. Prisma may report legacy schema changes before it can align the tables; do not accept a data-loss prompt until you have reviewed what it will remove.
+
+Then in the Supabase SQL Editor, run `supabase-business-security.sql` to enable row-level security and block direct browser access to the ticket data tables. The app accesses those tables through server-side Prisma routes.
+
+The seed creates Cebu City routes to Bato, Oslob, Boljoon, Dalaguete, Moalboal, Argao, Carcar, Toledo City, and Sibonga, plus active buses and a daily departure schedule for the next 30 days. After the tables already exist, use `npm run db:seed` to add or extend this sample catalog without deleting bookings.
+
+Run `supabase-auth-migration.sql` in the SQL Editor to create auth profiles, login history, the user-to-admin message board, and in-app notifications for new passenger/admin messages. This script is safe to rerun. If you already ran an older version of this script, run the updated file again; alternatively, run `supabase-notifications.sql` to add just the notification table and trigger.
+
+Do not run `supabase-schema.sql` on a database with data: it drops and recreates the bus-ticket tables. It is only for intentionally resetting a disposable/new database. Do not run `supabase-messages-rename.sql` unless the old `public.messages` table needs to be replaced; it drops that old table.
+
+## 4. Configure email OTP
+
+In **Authentication → Providers → Email**, enable email confirmation. For the **Password Recovery** email template, send the code with `{{ .Token }}` (for example, `Your password reset code is {{ .Token }}.`) and remove any recovery URL or link from that template. The app accepts password recovery only through the email address and numeric code flow; it does not send SMS codes or use password-reset links. Use `{{ .Token }}` in the signup and email OTP templates as well. Configure a custom SMTP provider in **Authentication → SMTP Settings** for reliable delivery. Set the code expiry in the Supabase Auth email/OTP settings; Supabase rejects expired codes when the app verifies them.
+
+The app supports these flows:
+
+1. **Registration:** register → email code → verify code → account activated.
+2. **Login:** email and password → email code → verify code → dashboard.
+3. **Forgot password:** request recovery code → verify code → set new password.
+
+The verification screens include a resend action. Supabase rate limits may temporarily delay repeated requests.
+
+## 5. Create an administrator
+
+Register using the app and verify that account’s email first. In Supabase SQL Editor, replace the address below with that account’s email and run:
+
+```sql
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+  || '{"role":"admin"}'::jsonb
+where lower(email) = lower('admin@example.com');
 ```
 
-### 3. Run Development Server
+Sign out and sign in again so the refreshed Supabase session includes the admin role. New registrations receive the regular `passenger` role; role data is stored in Supabase Auth app metadata and mirrored to `auth_profiles`.
+
+## 6. Start the app
+
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000).
 
-## Test Accounts
+## Implemented system requirements
 
-### Admin Account
-- **Email**: admin@busticket.com
-- **Password**: admin123
-- Access: Admin dashboard with full CRUD operations
+- Registration, login, logout, email OTP verification, expiration enforced by Supabase, and resend OTP.
+- Admin and passenger roles with protected pages and API routes.
+- Passenger and admin dashboards, an admin management area, and admin reports.
+- User-to-admin and admin-to-user message board.
+- Bus, route, trip, and booking operations, including create/read/update/delete actions where appropriate.
+- PostgreSQL database for buses, routes, trips, and bookings; Supabase Auth for users.
+- Route/trip search and filters, client and server input validation, login activity history, and booking records.
+- Password storage and verification handled by Supabase Auth.
+- Responsive public, booking, and account interfaces.
 
-### Passenger Account
-- **Email**: user@test.com
-- **Password**: test123
-- Access: User dashboard for booking tickets
+## Existing local SQLite data
 
-## Features Working
-
-✅ **Authentication**
-- Login with email/password
-- Role-based access (admin/passenger)
-- Secure JWT tokens
-- Session management
-
-✅ **User Features**
-- Search routes and trips
-- Book tickets with passenger details
-- View booking history
-- Select payment method (GCash/Maya)
-- View e-tickets
-
-✅ **Admin Features**
-- Manage buses (CRUD)
-- Manage routes (CRUD)
-- Manage trips (CRUD)
-- View all bookings
-- Dashboard statistics
-
-## Database
-
-Uses SQLite (file: `prisma/dev.db`) for simplicity.
-
-**Tables:**
-- users (authentication)
-- buses (fleet management)
-- routes (destinations)
-- trips (scheduled journeys)
-- bookings (ticket purchases)
-
-## Sample Data Included
-
-- 2 users (1 admin, 1 passenger)
-- 4 buses
-- 6 routes (Cebu to various destinations)
-- 84 trips (7 days × 4 routes × 3 trips/day)
-- 1 sample booking
-
-## API Routes
-
-### Authentication
-- POST `/api/auth/login` - User login
-- POST `/api/auth/register` - Create account
-- POST `/api/auth/logout` - Sign out
-- GET `/api/auth/me` - Get current user
-
-### Routes & Trips
-- GET `/api/routes` - List all routes
-- GET `/api/trips` - Search available trips
-- GET `/api/trips/[id]` - Get trip details
-
-### Bookings
-- POST `/api/bookings` - Create booking
-- GET `/api/bookings` - Get user bookings
-- GET `/api/bookings/[id]` - Get booking details
-- PUT `/api/bookings/[id]` - Update booking status
-
-### Admin
-- GET/POST `/api/admin/buses` - Manage buses
-- PUT/DELETE `/api/admin/buses/[id]` - Update/delete bus
-- GET/POST `/api/admin/routes` - Manage routes
-- PUT/DELETE `/api/admin/routes/[id]` - Update/delete route
-- GET/POST `/api/admin/trips` - Manage trips
-- PUT/DELETE `/api/admin/trips/[id]` - Update/delete trip
-
-## Development Commands
-
-```bash
-npm run dev          # Start development server
-npm run build        # Build for production
-npm run start        # Start production server
-npm run db:studio    # Open Prisma Studio (database GUI)
-npm run db:generate  # Regenerate Prisma client
-```
-
-## Troubleshooting
-
-### Database issues
-```bash
-# Reset database
-rm prisma/dev.db
-npm run db:setup
-```
-
-### Module not found errors
-```bash
-npm install
-npm run db:generate
-```
-
-## Next Steps for Production
-
-1. Switch from SQLite to PostgreSQL/MySQL
-2. Add email service (SendGrid/Resend) for confirmations
-3. Integrate real payment gateway (PayMongo/PayPal)
-4. Add SMS notifications (Twilio/Semaphore)
-5. Implement proper password hashing with bcrypt
-6. Add rate limiting and security headers
-7. Set up proper environment variables
-8. Deploy to Vercel/Railway/AWS
-
-## Support
-
-For issues or questions, check the code comments or contact the development team.
+The app now reads bus-ticket data from PostgreSQL. Existing records in `prisma/dev.db` are not copied automatically. The seed command creates sample buses, routes, and upcoming trips in PostgreSQL; bookings must be recreated or migrated separately if they need to be retained.

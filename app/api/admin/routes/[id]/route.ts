@@ -21,7 +21,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { name, fromCity, toCity, distance, basePrice, duration } = body;
+    const { name, fromCity, toCity, distance, basePrice, duration, status } = body;
 
     // Check if route exists
     const existingRoute = await prisma.route.findUnique({
@@ -35,14 +35,28 @@ export async function PUT(
       );
     }
 
+    for (const [field, value] of Object.entries({ name, fromCity, toCity, duration })) {
+      if (value !== undefined && (typeof value !== 'string' || !value.trim())) {
+        return NextResponse.json({ error: `Enter a valid route ${field}.` }, { status: 400 });
+      }
+    }
+
     // Build update data
     const updateData: any = {};
-    if (name) updateData.name = name;
-    if (fromCity) updateData.fromCity = fromCity;
-    if (toCity) updateData.toCity = toCity;
-    if (distance) updateData.distance = parseFloat(distance);
-    if (basePrice) updateData.basePrice = parseFloat(basePrice);
-    if (duration) updateData.duration = duration;
+    if (name !== undefined) updateData.name = name.trim();
+    if (fromCity !== undefined) updateData.fromCity = fromCity.trim();
+    if (toCity !== undefined) updateData.toCity = toCity.trim();
+    if (distance !== undefined) updateData.distance = Number(distance);
+    if (basePrice !== undefined) updateData.basePrice = Number(basePrice);
+    if (duration !== undefined) updateData.duration = duration.trim();
+    if (status !== undefined) {
+      if (!['active', 'inactive'].includes(status)) return NextResponse.json({ error: 'Route status must be active or inactive.' }, { status: 400 });
+      updateData.status = status;
+    }
+    if ((updateData.distance !== undefined && (!Number.isFinite(updateData.distance) || updateData.distance <= 0))
+      || (updateData.basePrice !== undefined && (!Number.isFinite(updateData.basePrice) || updateData.basePrice <= 0))) {
+      return NextResponse.json({ error: 'Distance and fare must be positive numbers.' }, { status: 400 });
+    }
 
     // Update route
     const updatedRoute = await prisma.route.update({
